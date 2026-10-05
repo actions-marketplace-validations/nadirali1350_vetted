@@ -4,13 +4,27 @@ import { vetSkill, crossSkillFindings } from "../lib/rules.mjs";
 import { sandbox, GOOD_DESC, rules } from "./helpers.mjs";
 
 const box = sandbox();
-const good = (extra = "") => `name: DIR\ndescription: ${GOOD_DESC}${extra}`;
+const good = (extra = "") => `name: DIR\ndescription: ${GOOD_DESC}\nlicense: MIT${extra}`;
 const make = (dir, fmText, body, extra) => vetSkill(box.skill(dir, fmText?.replace("DIR", dir) ?? null, body, extra));
 
 test("a well-formed skill has no findings", () => {
   const r = make("clean-skill", good());
   assert.deepEqual(rules(r), []);
   assert.ok(r.cost.descriptionTokens > 0);
+});
+
+test("spec: missing or empty license is informational", () => {
+  for (const extra of ["", "\nlicense:", "\nlicense: \"   \""]) {
+    const r = make("unlicensed", `name: DIR\ndescription: ${GOOD_DESC}${extra}`);
+    const f = r.findings.find((finding) => finding.rule === "spec/license-missing");
+    assert.ok(f, `missing license finding for ${JSON.stringify(extra)}`);
+    assert.equal(f.severity, "info");
+  }
+});
+
+test("spec: a declared license does not produce a missing-license finding", () => {
+  const r = make("licensed", good());
+  assert.ok(!rules(r).some((rule) => rule.endsWith("spec/license-missing")));
 });
 
 test("spec: missing frontmatter, name, description", () => {
@@ -161,6 +175,44 @@ test("sec: sudo is flagged, but words that merely contain it are not", () => {
 
   const miss = make("lookalikes", good(), "\nA pseudo-random seed, a sudoku solver, and the sudoers file are not the command.\n");
   assert.ok(!rules(miss).some((r) => r.endsWith("sec/sudo")), rules(miss).join());
+});
+
+test("sec: chmod 777 warns for plain and recursive commands", () => {
+  const commands = ["chmod 777 file", "chmod -R 777 dir", "chmod -Rf 777 dir", "chmod --recursive 777 dir", "chmod 0777 file"];
+  for (const [i, command] of commands.entries()) {
+    const r = make(`chmod-hit-${i}`, good(), `\nRun \`${command}\`.\n`);
+    assert.ok(rules(r).includes("warn:sec/chmod-777"), command);
+  }
+});
+
+test("sec: chmod 777 does not flag other modes or lookalikes", () => {
+  const commands = ["chmod 755 file", "chmod -R 644 dir", "chmod 7770 file", "chmod 777.txt", "mychmod 777 file", "chmod --reference=777 file"];
+  for (const [i, command] of commands.entries()) {
+    const r = make(`chmod-miss-${i}`, good(), `\nRun \`${command}\`.\n`);
+    assert.ok(!r.findings.some((f) => f.rule === "sec/chmod-777"), command);
+  }
+});
+
+test("sec: chmod 777 reports the script file and line", () => {
+  const r = make("chmod-script", good(), undefined, { "scripts/setup.sh": "#!/bin/sh\nchmod -R 777 cache\n" });
+  const f = r.findings.find((x) => x.rule === "sec/chmod-777");
+  assert.ok(f);
+  assert.equal(f.severity, "warn");
+  assert.equal(f.file, "scripts/setup.sh");
+  assert.equal(f.line, 2);
+});
+
+test("sec: cautionary chmod 777 examples are info", () => {
+  const r = make("chmod-caution", good(), "\nNever run `chmod 777 file`.\n");
+  assert.ok(rules(r).includes("info:sec/chmod-777"));
+  assert.ok(!rules(r).includes("warn:sec/chmod-777"));
+});
+
+test("sec: suppressing chmod 777 downgrades rather than hides it", () => {
+  const r = make("chmod-suppressed", good(), "\n<!-- vet-ignore: sec/chmod-777 -->\nRun `chmod 777 file`.\n");
+  const f = r.findings.find((x) => x.rule === "sec/chmod-777");
+  assert.ok(f);
+  assert.equal(f.severity, "info");
 });
 
 test("sec: scoped allowed-tools are fine", () => {

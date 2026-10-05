@@ -134,6 +134,12 @@ const SEC_PATTERNS = [
     re: /\bsudo\b/,
     msg: "uses sudo, which escalates privileges",
   },
+  {
+    rule: "sec/chmod-777",
+    severity: "warn",
+    re: /\bchmod\s+(?:(?:-[A-Za-z]+|--[a-z-]+|--)\s+)*0?777(?=\s|[`"';&|]|$)/,
+    msg: "makes files world-writable with chmod 777; use the narrowest permissions needed",
+  },
 ];
 
 const HIDDEN_UNICODE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]|\uDB40[\uDC00-\uDC7F]/g;
@@ -232,6 +238,8 @@ export function vetSkill(skillFile) {
   for (const w of parseWarnings) add("spec/frontmatter-parse", "warn", `frontmatter: ${w}`, "SKILL.md");
 
   if (data) {
+    if (typeof fm.license !== "string" || !fm.license.trim())
+      add("spec/license-missing", "info", "frontmatter has no `license`; declare the terms under which the skill can be reused");
     if (name === undefined || name === "") add("spec/name-missing", "error", "frontmatter has no `name`");
     else {
       if (name.length > LIMITS.nameMax) add("spec/name-format", "error", `name is ${name.length} characters; the limit is ${LIMITS.nameMax}`);
